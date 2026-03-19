@@ -6,10 +6,10 @@ import shutil
 import logging
 import ipaddress
 import subprocess
+import argparse
 from datetime import datetime
 
 # --- CONFIGURAZIONE ---
-TARGETS_FILE = "targets.txt"
 MAX_PORT = 10000
 MAX_CONCURRENT_SCANS = 30  # Numero di IP in parallelo (aumentato per ridurre i tempi)
 LOG_FILE = "scanner.log"
@@ -212,13 +212,40 @@ async def scan_ip(ip, csv_file, csv_lock, semaphore, completed_ips):
                 active_processes.discard(process)
 
 async def main():
+    parser = argparse.ArgumentParser(description="Automazione Nmap Scanner")
+    parser.add_argument("ips", nargs="*", help="Indirizzi IP o network CIDR da scansionare separati da spazio")
+    parser.add_argument("-f", "--file", type=str, help="File contenente la lista target da scansionare")
+    parser.add_argument("-b", "--bucket", type=str, help="Bucket GCP in cui caricare il file CSV finale (es. gs://mio-bucket/reports/)")
+    args = parser.parse_args()
+
     check_requirements()
 
     logging.info("Lettura target in corso...")
-    target_list = parse_targets(TARGETS_FILE)
+    
+    target_list = []
+    
+    if args.ips:
+        for ip_str in args.ips:
+            try:
+                if '/' in ip_str:
+                    network = ipaddress.ip_network(ip_str, strict=False)
+                    for ip in network.hosts():
+                        target_list.append(str(ip))
+                else:
+                    ip = ipaddress.ip_address(ip_str)
+                    target_list.append(str(ip))
+            except ValueError:
+                logging.warning(f"Target ignorato (formato non valido): {ip_str}")
+
+    if args.file:
+        file_targets = parse_targets(args.file)
+        target_list.extend(file_targets)
+        
+    # Rimuove duplicati
+    target_list = list(set(target_list))
     
     if not target_list:
-        logging.error("Nessun target valido trovato. Uscita.")
+        logging.error("Nessun target valido trovato. Usa gli IP come argomenti separati da spazio o usa il flag -f/--file. Uscita.")
         return
 
     csv_file = get_csv_filename(target_list)
@@ -247,6 +274,24 @@ async def main():
     
     logging.info(f"Scansione globale terminata. Risultati salvati (e ordinati) in: {csv_file}")
     
+    if args.bucket:
+        logging.info(f"Inizio caricamento su bucket GCP: {args.bucket}")
+        try:
+            result = subprocess.run(
+                ["gsutil", "cp", csv_file, args.bucket],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            if result.returncode == 0:
+                logging.info(f"Upload su {args.bucket} completato con successo.")
+            else:
+                logging.error(f"Errore durante l'upload su GCP:\n{result.stderr.strip()}")
+        except FileNotFoundError:
+            logging.error("Comando 'gsutil' non trovato. Assicurati che google-cloud-sdk sia installato e nel PATH.")
+        except Exception as e:
+            logging.error(f"Eccezione durante l'upload: {e}")
+
     # A fine script, per sicurezza ripristina lo stato corretto del TTY per evitare glitch visivi
     os.system("stty sane")
 
