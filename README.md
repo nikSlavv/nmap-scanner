@@ -4,11 +4,11 @@ Uno script Python per l'automazione di scansioni Nmap massive in modo concorrent
 
 ## Requisiti
 
-- **OS Environment**: Sviluppato per ambienti Linux.
-- **Python 3.7+**: Lo script utilizza la libreria `asyncio` per la gestione ottimizzata dei processi in background.
-- **Nmap Installato**: L'eseguibile di nmap deve risiedere nei path di sistema (es. `sudo apt install nmap`).
-- **Permessi Root**: Richiede l'esecuzione tramite `sudo` siccome utilizza dei layer raw-socket packet injection performati dalla flag `-sS` (SYN Stealth scan) di Nmap.
-- **Google Cloud SDK (gsutil)**: Richiesto esclusivamente qualora si decida di utilizzare la funzionalità di esportazione dei report sul proprio Cloud Bucket tramite l'argomento `-b`.
+- **OS Environment**: Sviluppato per ambienti Linux. Nessuna lib Python esterna extra da installare (nessun `pip install` necessario) per conservare l'OS "pulito".
+- **Python 3.7+**: Lo script sfrutta unicamente standard library di Python (`asyncio`, `argparse`, `csv`, `subprocess`, ecc.) per massima retro-compatibilità.
+- **Nmap**: Se non già presente nel path di sistema, lo script lo rileverà e in automatico cercherà di **auto-installarlo** in maniera trasparente tramite il package manager della macchina proxy/vergine (`apt`, `yum`, `dnf`, `pacman`, `zypper`).
+- **Permessi Root**: Richiede sempre `sudo` fin dall'inizio poiché esegue scan SYN Stealth e necessita dei permessi per auto-installare Nmap.
+- **Google Cloud SDK (gsutil)**: Obbligatorio se si abilita il flag `-b`. E' l'unica eccezione in cui si richiede di preconfigurare l'SDK manualmente onde evitare di aggiungere chiavi GPG e repository esterni Google non voluti.
 
 ## Utilizzo
 

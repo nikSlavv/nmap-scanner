@@ -35,14 +35,50 @@ logging.basicConfig(
     ]
 )
 
-def check_requirements():
-    """Verifica che lo script giri come root e che nmap sia installato."""
+def install_nmap():
+    logging.info("Nmap non trovato. Tentativo di installazione automatica in corso...")
+    if shutil.which("apt-get"):
+        subprocess.run(["apt-get", "update", "-y"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        cmd = ["apt-get", "install", "-y", "nmap"]
+    elif shutil.which("yum"):
+        cmd = ["yum", "install", "-y", "nmap"]
+    elif shutil.which("dnf"):
+        cmd = ["dnf", "install", "-y", "nmap"]
+    elif shutil.which("pacman"):
+        cmd = ["pacman", "-Sy", "--noconfirm", "nmap"]
+    elif shutil.which("zypper"):
+        cmd = ["zypper", "install", "-y", "nmap"]
+    else:
+        logging.error("Nessun gestore pacchetti supportato trovato. Impossibile installare Nmap in automatico.")
+        return False
+        
+    try:
+        logging.info(f"Esecuzione: {' '.join(cmd)}")
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if result.returncode == 0:
+            logging.info("Nmap installato con successo!")
+            return True
+        else:
+            logging.error(f"Errore durante l'installazione di Nmap:\n{result.stderr.strip()}")
+            return False
+    except Exception as e:
+        logging.error(f"Eccezione durante l'installazione: {e}")
+        return False
+
+def check_requirements(args):
+    """Verifica privilegi di root, installa Nmap se assente e controlla gsutil se serve."""
     if os.geteuid() != 0:
         logging.error("Questo script richiede privilegi di root. Riavvia con: sudo python3 scan.py")
         sys.exit(1)
         
     if not shutil.which("nmap"):
-        logging.error("Eseguibile 'nmap' non trovato nel sistema. Installalo prima di procedere.")
+        if not install_nmap():
+            logging.error("Impossibile installare 'nmap' automaticamente. Installalo manualmente.")
+            sys.exit(1)
+            
+    if args.bucket and not shutil.which("gsutil"):
+        logging.error("L'upload su GCP è richiesto, ma 'gsutil' non è installato nel sistema.")
+        logging.error("Per evitare di sporcare il sistema con repository esterni, si richiede di installare google-cloud-cli manualmente se l'upload cloud è desiderato.")
         sys.exit(1)
 
 def parse_targets(filename):
@@ -218,7 +254,7 @@ async def main():
     parser.add_argument("-b", "--bucket", type=str, help="Bucket GCP in cui caricare il file CSV finale (es. gs://mio-bucket/reports/)")
     args = parser.parse_args()
 
-    check_requirements()
+    check_requirements(args)
 
     logging.info("Lettura target in corso...")
     
