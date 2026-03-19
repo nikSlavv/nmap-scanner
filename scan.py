@@ -106,9 +106,18 @@ def parse_targets(filename):
     return list(set(targets)) # Rimuove duplicati
 
 def get_csv_filename(targets):
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     if not targets:
-        return "scan_empty.csv"
-    return f"scan_results_{targets[0]}_to_last.csv"
+        return f"scan_empty_{timestamp}.csv"
+        
+    num_targets = len(targets)
+    # Sanitizziamo l'IP o Network qualora contenesse slash (es CIDR)
+    first_target = targets[0].replace('/', '_')
+    
+    if num_targets == 1:
+        return f"scan_{first_target}_{timestamp}.csv"
+    else:
+        return f"scan_{first_target}_plus_{num_targets - 1}_others_{timestamp}.csv"
 
 def load_completed_ips(csv_file):
     """Ottimizzazione I/O: Carica gli IP finiti in un Set (RAM) una volta sola."""
