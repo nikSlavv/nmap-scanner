@@ -2,6 +2,24 @@
 
 Uno script Python per l'automazione di scansioni Nmap massive in modo concorrente e asincrono su molteplici IP e network CIDR, con esportazione automatizzata in CSV e (opzionalmente) push verso Google Cloud Storage.
 
+```mermaid
+graph TD
+    A[Start: CLI Input] --> B{Dependency Check}
+    B -- Nmap Missing --> C[Auto-Install Nmap]
+    B -- Checked --> D[Target Parsing: IPs/CIDR/File]
+    C --> D
+    D --> E[Concurrent Mass Port Scan - Phase 1]
+    E --> F{--vuln Flag?}
+    F -- Yes --> G[Targeted Vuln Scan - Phase 2]
+    F -- No --> H[Generate CSV Report]
+    G --> H
+    H --> I[Numerical IP Sorting]
+    I --> J{--bucket Flag?}
+    J -- Yes --> K[GCP Upload: gsutil cp]
+    J -- No --> L[End: Local CSV Ready]
+    K --> L
+```
+
 ## Requisiti
 
 - **OS Environment**: Sviluppato per ambienti Linux. Nessuna lib Python esterna extra da installare (nessun `pip install` necessario) per conservare l'OS "pulito".
