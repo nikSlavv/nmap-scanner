@@ -22,7 +22,7 @@ sudo python3 scan.py [ips ...] [-f FILE] [-b BUCKET]
 
 - **`ips`**: (Posizionale) Uno o più indirizzi IP o network (range CIDR). Non c'è un limite se non lo stack della shell, separali semplicemente con uno spazio.
 - **`-f`, `--file FILE`**: (Opzionale) File di testo contenente IP e/o CIDR format da dover parsare per aggiungere target. Usalo unito agli IP passati in argomenti, i duplicati verranno filtrati ed eliminati automaticamente.
-- **`-b`, `--bucket BUCKET`**: (Opzionale) URI di un bucket GCP compatibile con i comandi del protocollo gsutil in cui depositare l'archivio CSV generato a root script terminata. Es (`gs://mio-sec-bucket/reports/`).
+- **`-b`, `--bucket BUCKET`**: (Opzionale) Esclusivamente il **nome del bucket** GCP (es. `bucket-aziendale`). Il sistema formatterà in automatico i protocolli (`gs://`) depositando il CSV direttamente alla root del bucket, partendo dal presupposto che il bucket sia dedicato a tali report.
 
 ## Esempi Comuni
 

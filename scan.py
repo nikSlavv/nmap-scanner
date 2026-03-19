@@ -251,7 +251,7 @@ async def main():
     parser = argparse.ArgumentParser(description="Automazione Nmap Scanner")
     parser.add_argument("ips", nargs="*", help="Indirizzi IP o network CIDR da scansionare separati da spazio")
     parser.add_argument("-f", "--file", type=str, help="File contenente la lista target da scansionare")
-    parser.add_argument("-b", "--bucket", type=str, help="Bucket GCP in cui caricare il file CSV finale (es. gs://mio-bucket/reports/)")
+    parser.add_argument("-b", "--bucket", type=str, help="Nome del bucket GCP in cui caricare il file CSV (es. 'mio-bucket')")
     args = parser.parse_args()
 
     check_requirements(args)
@@ -311,16 +311,21 @@ async def main():
     logging.info(f"Scansione globale terminata. Risultati salvati (e ordinati) in: {csv_file}")
     
     if args.bucket:
-        logging.info(f"Inizio caricamento su bucket GCP: {args.bucket}")
+        # Pulizia dell'input utente per rimuovere eventuali gs:// inseriti per sbaglio
+        clean_bucket_name = args.bucket.replace("gs://", "").strip("/")
+        # Creazione di un path dinamico per depositare i file nella root del bucket dedicato agli scan
+        report_dir = f"gs://{clean_bucket_name}/"
+        
+        logging.info(f"Inizio caricamento verso la directory Cloud GCP: {report_dir}")
         try:
             result = subprocess.run(
-                ["gsutil", "cp", csv_file, args.bucket],
+                ["gsutil", "cp", csv_file, report_dir],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True
             )
             if result.returncode == 0:
-                logging.info(f"Upload su {args.bucket} completato con successo.")
+                logging.info(f"Upload di '{csv_file}' su {report_dir} completato con successo.")
             else:
                 logging.error(f"Errore durante l'upload su GCP:\n{result.stderr.strip()}")
         except FileNotFoundError:
