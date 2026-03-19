@@ -7,6 +7,8 @@ import logging
 import ipaddress
 import subprocess
 import argparse
+import xml.etree.ElementTree as ET
+import re
 from datetime import datetime
 
 # --- CONFIGURAZIONE ---
@@ -80,6 +82,31 @@ def check_requirements(args):
         logging.error("L'upload su GCP è richiesto, ma 'gsutil' non è installato nel sistema.")
         logging.error("Per evitare di sporcare il sistema con repository esterni, si richiede di installare google-cloud-cli manualmente se l'upload cloud è desiderato.")
         sys.exit(1)
+
+def extract_vulns_from_nmap_xml(xml_bytes):
+    try:
+        root = ET.fromstring(xml_bytes)
+        vulns = []
+        for port in root.findall(".//port"):
+            portid = port.get('portid')
+            for script in port.findall(".//script"):
+                out = script.get('output', "")
+                for line in out.split('\n'):
+                    clean_line = " ".join(line.strip().split())
+                    if "CVE-" in clean_line:
+                        match = re.search(r'(CVE-\d{4}-\d+)', clean_line)
+                        if match:
+                            cve = match.group(1)
+                            msg = f"P{portid}({cve})"
+                            if msg not in vulns:
+                                vulns.append(msg)
+                    elif "VULNERABLE" in clean_line:
+                        msg = f"P{portid}({script.get('id')}:VULN)"
+                        if msg not in vulns:
+                            vulns.append(msg)
+        return vulns
+    except Exception:
+        return []
 
 def parse_targets(filename):
     """Legge il file target ed espande eventuali range CIDR in singoli IP validi."""
@@ -170,7 +197,7 @@ def sort_csv_results(csv_file):
         writer.writerows(rows)
     logging.info("Ordinamento CSV completato.")
 
-async def scan_ip(ip, csv_file, csv_lock, semaphore, completed_ips):
+async def scan_ip(ip, csv_file, csv_lock, semaphore, completed_ips, enable_vuln=False):
     # Controllo immediato in RAM
     if ip in completed_ips:
         logging.info(f"{ip} già completato. Salto.")
@@ -241,8 +268,38 @@ async def scan_ip(ip, csv_file, csv_lock, semaphore, completed_ips):
             
             ports_str = " | ".join(open_ports) if open_ports else "Nessuna porta aperta"
             
+            vulns_str = "N/A"
+            if enable_vuln:
+                if open_ports:
+                    port_numbers = [p.split()[0] for p in open_ports]
+                    port_list = ",".join(port_numbers)
+                    
+                    vuln_cmd = ["nmap", "-Pn", "-sV", "--script", "vulners,vuln", "--script-timeout", "2m", "-p", port_list, "-oX", "-", ip]
+                    logging.info(f"[{ip}] Fase 2: Scansione Vulnerabilità in corso per le porte: {port_list}...")
+                    
+                    try:
+                        vuln_proc = await asyncio.create_subprocess_exec(
+                            *vuln_cmd,
+                            stdin=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE
+                        )
+                        active_processes.add(vuln_proc)
+                        vuln_xml, _ = await vuln_proc.communicate()
+                        active_processes.discard(vuln_proc)
+                        
+                        vulns = extract_vulns_from_nmap_xml(vuln_xml)
+                        vulns_str = " | ".join(vulns) if vulns else "Nessuna vuln nota trovata"
+                    except Exception as e:
+                        vulns_str = f"Errore Vuln Scan"
+                        logging.error(f"Eccezione Vuln Scan su {ip}: {e}")
+                else:
+                    vulns_str = "Nessuna porta"
+            else:
+                vulns_str = "Disabilitato"
+                
             # Unica riga per questo IP che accorpa tutte le porte e segna SCAN_FINISHED
-            results_to_write = [[timestamp, ip, ports_str, "SCAN_FINISHED"]]
+            results_to_write = [[timestamp, ip, ports_str, "SCAN_FINISHED", vulns_str]]
             
             # Scrittura asincrona non bloccante sul disco
             async with csv_lock:
@@ -261,6 +318,7 @@ async def main():
     parser.add_argument("ips", nargs="*", help="Indirizzi IP o network CIDR da scansionare separati da spazio")
     parser.add_argument("-f", "--file", type=str, help="File contenente la lista target da scansionare")
     parser.add_argument("-b", "--bucket", type=str, help="Nome del bucket GCP in cui caricare il file CSV (es. 'mio-bucket')")
+    parser.add_argument("--vuln", action="store_true", help="Esegue una scansione VULNERABILITA' (Fase 2) unicamente sulle porte aperte")
     args = parser.parse_args()
 
     check_requirements(args)
@@ -300,7 +358,7 @@ async def main():
     
     if not os.path.exists(csv_file):
         with open(csv_file, "w", newline="") as f:
-            csv.writer(f).writerow(["TIMESTAMP", "IP", "OPEN_PORTS", "STATUS"])
+            csv.writer(f).writerow(["TIMESTAMP", "IP", "OPEN_PORTS", "STATUS", "VULNERABILITIES"])
 
     logging.info(f"Inizio scansione su {len(target_list)} target unici.")
     logging.info(f"Saltati (già completati): {len(completed_ips)}")
@@ -309,7 +367,7 @@ async def main():
     csv_lock = asyncio.Lock()
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_SCANS)
     
-    tasks = [scan_ip(ip, csv_file, csv_lock, semaphore, completed_ips) for ip in target_list]
+    tasks = [scan_ip(ip, csv_file, csv_lock, semaphore, completed_ips, args.vuln) for ip in target_list]
     await asyncio.gather(*tasks)
 
     logging.info("="*50)

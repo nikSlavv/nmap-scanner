@@ -23,6 +23,7 @@ sudo python3 scan.py [ips ...] [-f FILE] [-b BUCKET]
 - **`ips`**: (Posizionale) Uno o più indirizzi IP o network (range CIDR). Non c'è un limite se non lo stack della shell, separali semplicemente con uno spazio.
 - **`-f`, `--file FILE`**: (Opzionale) File di testo contenente IP e/o CIDR format da dover parsare per aggiungere target. Usalo unito agli IP passati in argomenti, i duplicati verranno filtrati ed eliminati automaticamente.
 - **`-b`, `--bucket BUCKET`**: (Opzionale) Esclusivamente il **nome del bucket** GCP (es. `bucket-aziendale`). Il sistema formatterà in automatico i protocolli (`gs://`) depositando il CSV direttamente alla root del bucket, partendo dal presupposto che il bucket sia dedicato a tali report.
+- **`--vuln`**: (Opzionale) Attiva lo scanning **Two-Phase (Due Fasi)** di Vulnerabilità per l'identificazione CVE. Ottimizzato per la velocità: Nmap invocherà il motore di scripting (NSE) esclusivamente sulle porte accertate come "Open", evitando sovraccarichi e riducendo il tempo di calcolo.
 
 ## Esempi Comuni
 
