@@ -197,6 +197,33 @@ def sort_csv_results(csv_file):
         writer.writerows(rows)
     logging.info("Ordinamento CSV completato.")
 
+def upload_to_gcp(csv_file, bucket_name):
+    """Carica un file CSV locale su un bucket GCS specificato."""
+    if not bucket_name:
+        return
+        
+    # Pulizia dell'input utente per rimuovere eventuali gs:// inseriti per sbaglio
+    clean_bucket_name = bucket_name.replace("gs://", "").strip("/")
+    # Creazione di un path dinamico per depositare i file nella root del bucket dedicato agli scan
+    report_dir = f"gs://{clean_bucket_name}/"
+    
+    logging.info(f"Inizio caricamento verso la directory Cloud GCP: {report_dir}")
+    try:
+        result = subprocess.run(
+            ["gsutil", "cp", csv_file, report_dir],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        if result.returncode == 0:
+            logging.info(f"Upload di '{csv_file}' su {report_dir} completato con successo.")
+        else:
+            logging.error(f"Errore durante l'upload su GCP:\n{result.stderr.strip()}")
+    except FileNotFoundError:
+        logging.error("Comando 'gsutil' non trovato. Assicurati che google-cloud-sdk sia installato e nel PATH.")
+    except Exception as e:
+        logging.error(f"Eccezione durante l'upload: {e}")
+
 async def scan_ip(ip, csv_file, csv_lock, semaphore, completed_ips, enable_vuln=False):
     # Controllo immediato in RAM
     if ip in completed_ips:
@@ -367,38 +394,20 @@ async def main():
     csv_lock = asyncio.Lock()
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_SCANS)
     
-    tasks = [scan_ip(ip, csv_file, csv_lock, semaphore, completed_ips, args.vuln) for ip in target_list]
-    await asyncio.gather(*tasks)
-
-    logging.info("="*50)
-    
-    # Ordina il CSV
-    sort_csv_results(csv_file)
-    
-    logging.info(f"Scansione globale terminata. Risultati salvati (e ordinati) in: {csv_file}")
-    
-    if args.bucket:
-        # Pulizia dell'input utente per rimuovere eventuali gs:// inseriti per sbaglio
-        clean_bucket_name = args.bucket.replace("gs://", "").strip("/")
-        # Creazione di un path dinamico per depositare i file nella root del bucket dedicato agli scan
-        report_dir = f"gs://{clean_bucket_name}/"
+    try:
+        tasks = [scan_ip(ip, csv_file, csv_lock, semaphore, completed_ips, args.vuln) for ip in target_list]
+        await asyncio.gather(*tasks)
+    except (asyncio.CancelledError, KeyboardInterrupt):
+        logging.info("Esecuzione interrotta. Avvio procedure di salvataggio emergenza...")
+        raise
+    finally:
+        logging.info("="*50)
+        # Ordina il CSV
+        sort_csv_results(csv_file)
+        logging.info(f"Risultati salvati (e ordinati) in: {csv_file}")
         
-        logging.info(f"Inizio caricamento verso la directory Cloud GCP: {report_dir}")
-        try:
-            result = subprocess.run(
-                ["gsutil", "cp", csv_file, report_dir],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-            if result.returncode == 0:
-                logging.info(f"Upload di '{csv_file}' su {report_dir} completato con successo.")
-            else:
-                logging.error(f"Errore durante l'upload su GCP:\n{result.stderr.strip()}")
-        except FileNotFoundError:
-            logging.error("Comando 'gsutil' non trovato. Assicurati che google-cloud-sdk sia installato e nel PATH.")
-        except Exception as e:
-            logging.error(f"Eccezione durante l'upload: {e}")
+        if args.bucket:
+            upload_to_gcp(csv_file, args.bucket)
 
     # A fine script, per sicurezza ripristina lo stato corretto del TTY per evitare glitch visivi
     os.system("stty sane")
@@ -407,7 +416,7 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logging.info("Scansione interrotta dall'utente. Uccisione di tutti i processi Nmap in background in corso...")
+        logging.info("Interruzione rilevata. Pulizia finale dei processi in corso...")
         # Killa forzatamente qualsiasi processo nmap rimasto in esecuzione nel set
         for p in list(active_processes):
             try:

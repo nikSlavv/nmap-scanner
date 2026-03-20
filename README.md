@@ -1,6 +1,6 @@
 # Nmap Scanner Automation
 
-Uno script Python per l'automazione di scansioni Nmap massive in modo concorrente e asincrono su molteplici IP e network CIDR, con esportazione automatizzata in CSV e (opzionalmente) push verso Google Cloud Storage.
+A Python script for massive, asynchronous Nmap scans across multiple IPs and CIDR networks. It features automated CSV exporting, numerical IP sorting, and optional Google Cloud Storage (GCS) synchronization for production-grade stateless scanning.
 
 ```mermaid
 graph TD
@@ -20,55 +20,60 @@ graph TD
     K --> L
 ```
 
-## Requisiti
+## Key Features
 
-- **OS Environment**: Sviluppato per ambienti Linux. Nessuna lib Python esterna extra da installare (nessun `pip install` necessario) per conservare l'OS "pulito".
-- **Python 3.7+**: Lo script sfrutta unicamente standard library di Python (`asyncio`, `argparse`, `csv`, `subprocess`, ecc.) per massima retro-compatibilità.
-- **Nmap**: Se non già presente nel path di sistema, lo script lo rileverà e in automatico cercherà di **auto-installarlo** in maniera trasparente tramite il package manager della macchina proxy/vergine (`apt`, `yum`, `dnf`, `pacman`, `zypper`).
-- **Permessi Root**: Richiede sempre `sudo` fin dall'inizio poiché esegue scan SYN Stealth e necessita dei permessi per auto-installare Nmap.
-- **Google Cloud SDK (gsutil)**: Obbligatorio se si abilita il flag `-b`. E' l'unica eccezione in cui si richiede di preconfigurare l'SDK manualmente onde evitare di aggiungere chiavi GPG e repository esterni Google non voluti.
+- **Stateless & Resumable**: Automatically loads existing results from the CSV (local or cloud) to skip already completed IPs.
+- **Graceful Termination**: Handles `SIGINT` (Ctrl+C) and `SIGTERM` (GCP shutdown scripts) by flushing data, sorting results, and uploading to the cloud before exiting.
+- **Asynchronous Execution**: Leverages `asyncio` for high-performance concurrent scans.
+- **Zero Configuration**: No external Python libraries required. Only standard library dependencies.
+- **Automatic Dependency Resolution**: Automatically installs `nmap` if missing using the system's package manager (`apt`, `yum`, `dnf`, etc.).
 
-## Utilizzo
+## Requirements
 
-Lo script è flessibile con i parametri di input e può prelevare target multipli sia dalla riga di comando sia caricati da un file:
+- **OS Environment**: Linux-based systems.
+- **Python 3.7+**: Uses `asyncio`, `argparse`, `csv`, `subprocess`, etc.
+- **Root Privileges**: `sudo` is required for SYN Stealth scans and automatic package installation.
+- **Google Cloud SDK (gsutil)**: Required only if using the `-b` flag for cloud synchronization.
+
+## Usage
 
 ```bash
-sudo python3 scan.py [ips ...] [-f FILE] [-b BUCKET]
+sudo python3 scan.py [ips ...] [-f FILE] [-b BUCKET] [--vuln]
 ```
 
-### Argomenti Disponibili
+### Arguments
 
-- **`ips`**: (Posizionale) Uno o più indirizzi IP o network (range CIDR). Non c'è un limite se non lo stack della shell, separali semplicemente con uno spazio.
-- **`-f`, `--file FILE`**: (Opzionale) File di testo contenente IP e/o CIDR format da dover parsare per aggiungere target. Usalo unito agli IP passati in argomenti, i duplicati verranno filtrati ed eliminati automaticamente.
-- **`-b`, `--bucket BUCKET`**: (Opzionale) Esclusivamente il **nome del bucket** GCP (es. `bucket-aziendale`). Il sistema formatterà in automatico i protocolli (`gs://`) depositando il CSV direttamente alla root del bucket, partendo dal presupposto che il bucket sia dedicato a tali report.
-- **`--vuln`**: (Opzionale) Attiva lo scanning **Two-Phase (Due Fasi)** di Vulnerabilità per l'identificazione CVE. Ottimizzato per la velocità: Nmap invocherà il motore di scripting (NSE) esclusivamente sulle porte accertate come "Open", evitando sovraccarichi e riducendo il tempo di calcolo.
+- **`ips`**: (Positional) One or more IP addresses or CIDR networks (e.g., `8.8.8.8 192.168.1.0/24`).
+- **`-f`, `--file FILE`**: (Optional) Text file containing a list of targets (IPs or CIDR). Duplicates are automatically filtered.
+- **`-b`, `--bucket BUCKET`**: (Optional) GCS bucket name (e.g., `my-reports-bucket`). Reports are uploaded directly to the root of the bucket.
+- **`--vuln`**: (Optional) Enables Two-Phase Vulnerability scanning using Nmap Scripting Engine (NSE) only on discovered open ports.
 
-## Esempi Comuni
+## Examples
 
-**Scansione IP diretti:**
+**Direct IP Scan:**
 ```bash
-sudo python3 scan.py 192.168.1.1 8.8.8.8 10.0.0.0/24
+sudo python3 scan.py 1.1.1.1 8.8.8.8 10.0.0.0/24
 ```
 
-**Scansione tramite file esterno:**
+**File-based Scan:**
 ```bash
-sudo python3 scan.py -f ips_da_scansionare.txt
+sudo python3 scan.py -f targets.txt
 ```
 
-**Scansione con caricamento su Google Cloud Platform:**
+**GCP-Integrated Production Scan:**
 ```bash
-sudo python3 scan.py 192.168.1.1 -f miei_target.txt -b gs://bucket-aziendale-reports/
+sudo python3 scan.py -f targets.txt -b my-gcp-bucket --vuln
 ```
 
-## Formato Report
+## Data Integrity & Resilience
 
-I risultati vengono scritti man mano (thread-safe append al volo) su file CSV.
-Se un task dovesse morire oppure bloccato dall'utente il CSV continuerà comunque a trattenere gli hostname che hanno terminato. 
-Al termine globale dell'esecuzione, avverrà in automatico l'**ordinamento degli IP per via numerica**, riordinando il report e se specificato spinto sul Cloud.
+The script is designed for cloud-native reliability:
+1. **Thread-Safe Writing**: Results are appended to the CSV immediately upon completion.
+2. **Post-Process Sorting**: Results are numerically sorted by IP address before finalization.
+3. **Shutdown Resilience**: If interrupted, the script executes emergency cleanup procedures, ensuring the final report is sorted and synchronized with the cloud.
 
-## Impostazioni modificabili (su `scan.py`)
+## Configuration (within `scan.py`)
 
-All'interno dello script puoi variare queste variabili alla voce "CONFIGURAZIONE":
-- `MAX_PORT`: (Default: `10000`) Limita i port range alle Top prime porte scansionate anziché tutte le 65535.
-- `MAX_CONCURRENT_SCANS`: (Default: `30`) Modifica la concorrenza massima e quante esecuzioni processi Nmap lanciare parallelamente. Attenzione a non inondare il routing hardware o il file system.
-- `LOG_FILE`: Nome del file in cui verranno stampati i log operativi. (Default `scanner.log`).
+- `MAX_PORT`: (Default: `10000`) Port range limit.
+- `MAX_CONCURRENT_SCANS`: (Default: `30`) Maximum number of parallel Nmap processes.
+- `LOG_FILE`: (Default: `scanner.log`) Operational log file.
